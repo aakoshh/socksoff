@@ -24,6 +24,8 @@ object ServerMain
 
       // Wait for Ctrl+C
       Thread.currentThread.join
+
+      proxyServer.shutdown()
     } catch {
       case NonFatal(ex) =>
         logger.error("Fatal error, exiting.", ex)
@@ -82,6 +84,8 @@ object ServerMain
           override def makeStreamPipe(in: InputStream, out: OutputStream, name: String): Pipe = {
 
             new StreamPipe(in, out, name) {
+              val chunks = collection.mutable.Buffer.empty[Array[Byte]]
+
               override def doTransfer(buffer: Array[Byte]): Int = {
                 try {
                   (in, out) match {
@@ -90,13 +94,14 @@ object ServerMain
                       val length = localIn.read(buffer)
                       if (length > 0) {
                         send(remoteOut, buffer, length)
+                        length
                       } else {
+                        // There's no notification when the HTTP message is over, it just waits.
                         -1
                       }
 
                     case (_: DummyInputStream, localOut) =>
-                      // `in` is the DummySocket, so we have to check if got all the SMS messages
-                      // and send it to it if we do, in chunks.
+                      // This is where we'll have to reconstruct a message from a bunch of out of sequence SMS parts.
                       val length = remoteIn.read(buffer)
                       if (length > 0) {
                         send(localOut, buffer, length)

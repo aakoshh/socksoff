@@ -1,10 +1,7 @@
 
 libraryDependencies ++= Seq(
-  "io.github.fengyouchao" % "sockslib" % VersionOf.sockslib
-)
-
-libraryDependencies ++= Seq(
-    "com.typesafe.scala-logging" %% "scala-logging" % VersionOf.`typesafe-logging`
+  "io.github.fengyouchao" % "sockslib" % VersionOf.sockslib,
+  "com.typesafe.scala-logging" %% "scala-logging" % VersionOf.`typesafe-logging`
 )// .map(_.exclude("*", "slf4j-log4j12"))
 
 excludeDependencies += ExclusionRule("*", "slf4j-log4j12")
@@ -19,5 +16,3 @@ packExtraClasspath := mains.keys.map(_ -> Seq(
   // Add a /deps directory for JARs so we can copy JARs in 2 steps.
   "${PROG_HOME}/deps/*"
 )).toMap
-
-fork in IntegrationTest := false

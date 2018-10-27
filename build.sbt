@@ -58,3 +58,6 @@ enablePlugins(PackPlugin)
 
 // Runnable SOCKS5 server
 lazy val server = proj("server", hasMain = true)
+
+// SMS library
+lazy val sms = proj("sms")

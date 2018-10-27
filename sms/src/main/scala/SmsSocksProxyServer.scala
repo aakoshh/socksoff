@@ -73,15 +73,15 @@ class SmsSocksProxyServer(
     // Keep track of the chunks we received from in SMS messages.
     val chunks = TrieMap.empty[Int, Array[Byte]]
 
-    // When it's known, set the last chunk ID.
-    var lastChunkId = 0
+    // When it's known, set the last chunk ID so we know when to stop waiting for more data.
+    var finalChunkId = 0
 
     def onChunk(chunkId: Int, text: String) = {
       if (text.endsWith(".")) {
         val bytes = Base64.getDecoder.decode(text.dropRight(1))
         chunks(chunkId) = bytes
         // Indicate that we got the last chunk.
-        lastChunkId = chunkId
+        finalChunkId = chunkId
       } else {
         val bytes = Base64.getDecoder.decode(text)
         chunks(chunkId) = bytes
@@ -116,12 +116,10 @@ class SmsSocksProxyServer(
           val chunks = text.grouped(MessageSize) map { chunk =>
             val chunkId = chunkIds.next()
             val message = s"$id:$chunkId\n$chunk"
+            logger.debug(s"Sending SMS chunk: $id:$chunkId")
             message
           }
-          chunks foreach { chunk =>
-            logger.debug(s"Sending SMS: $id:$chunkId")
-            smsService.sendTextMessage(chunk)
-          }
+          chunks foreach { smsService.sendTextMessage(_) }
         }
 
         // Will make two pipes to move the data between the two sockets in both directions.
@@ -147,18 +145,18 @@ class SmsSocksProxyServer(
                     }
 
                   case (_: DummyInputStream, localOut) =>
-                    if (chunks contains nextChunkId) {
-                      val buffer = chunks(nextChunkId)
-                      send(localOut, buffer, buffer.length)
-                      nextChunkId += 1
-                      buffer.length
-                    } else if (nextChunkId > lastChunkId) {
-                      // We sent out the last chunk, nothing more to do.
-                      -1
-                    } else {
-                      // Let the outside loop call this again a bit later.
-                      Thread.sleep(10)
-                      0
+                    chunks.remove(nextChunkId) match {
+                      case Some(buffer) =>
+                        send(localOut, buffer, buffer.length)
+                        nextChunkId += 1
+                        buffer.length
+                      case _ if finalChunkId != 0 && nextChunkId > finalChunkId =>
+                        // We sent out the last chunk, nothing more to do.
+                        -1
+                      case _ =>
+                        // Let the outside loop call this again a bit later.
+                        Thread.sleep(10)
+                        0
                     }
                 }
               } catch {

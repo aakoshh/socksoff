@@ -27,7 +27,7 @@ def proj(
     base = file(folder))
   .settings(
     name := s"socksoff-$id",
-    organization := "com.dunnhumby")
+    organization := "com.socksoff")
   .configs(IntegrationTest) // run them like `it:test`
   .settings(
     Defaults.itSettings,

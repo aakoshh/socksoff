@@ -77,11 +77,6 @@ class SmsSocksProxyServer(
       new SocketPipe(socket1, socket2) with SmsChunkHandler { self =>
         logger.info(s"Connecting to ${socket2.getInetAddress}:${socket2.getPort}")
 
-        // Make a real socket now.
-        val remote = new Socket(socket2.getInetAddress, socket2.getPort)
-        val remoteIn = remote.getInputStream
-        val remoteOut = remote.getOutputStream
-
         // Register so we can pick the right handler when a message comes.
         val id = counter.incrementAndGet()
         handlers += id -> self
@@ -132,7 +127,6 @@ class SmsSocksProxyServer(
         }
 
         override def close(): Boolean = {
-          Try(remote.close())
           chunks.clear()
           super.close()
         }

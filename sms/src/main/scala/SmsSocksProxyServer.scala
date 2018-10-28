@@ -115,9 +115,11 @@ class SmsSocksProxyServer(
           val text = Base64.getEncoder.encodeToString(buffer.take(length))
           val chunks = text.grouped(MessageSize) map { chunk =>
             val chunkId = chunkIds.next()
-            val message = s"$id:$chunkId\n$chunk"
-            logger.debug(s"Sending SMS chunk: $id:$chunkId")
-            message
+            // Send the remote address the server has to connect to with the first request.
+            val addr = if (chunkId == 1) s":${socket2.getInetAddress}:${socket2.getPort}" else ""
+            val head = "${id}:${chunkId}${addr}"
+            logger.debug(s"Sending SMS chunk: ${head}")
+            s"${head}\n${chunk}"
           }
           chunks foreach { smsService.sendTextMessage(_) }
         }

@@ -41,7 +41,7 @@ class SmsSocksProxyServer(
   }
 
   val counter = new AtomicLong(0)
-  val handlers = TrieMap.empty[Long, SmsSocketHandler]
+  val handlers = TrieMap.empty[Long, SmsChunkHandler]
 
   /** Parse the text message and forward it to the right handler. */
   def onTextMessage(message: String): Unit = {
@@ -63,31 +63,6 @@ class SmsSocksProxyServer(
   // Inner class so it can have access to the `smsService`
   class SmsSocketHandler() extends Socks5Handler {
 
-    // Register so we can pick the right handler when a message comes.
-    val id = counter.incrementAndGet()
-    handlers += id -> this
-
-    // An incrementing counter for outgoing chunks, starting from 1.
-    val chunkIds = Stream.from(0).iterator
-
-    // Keep track of the chunks we received from in SMS messages.
-    val chunks = TrieMap.empty[Int, Array[Byte]]
-
-    // When it's known, set the last chunk ID so we know when to stop waiting for more data.
-    var finalChunkId = 0
-
-    def onChunk(chunkId: Int, text: String) = {
-      if (text.endsWith(".")) {
-        val bytes = Base64.getDecoder.decode(text.dropRight(1))
-        chunks(chunkId) = bytes
-        // Indicate that we got the last chunk.
-        finalChunkId = chunkId
-      } else {
-        val bytes = Base64.getDecoder.decode(text)
-        chunks(chunkId) = bytes
-      }
-    }
-
     override def makeRemoteSocket(address: InetAddress, port: Int): Socket = {
       // Return a socket that the base handler can ask for the address
       // but which doesn't actually connect.
@@ -96,20 +71,26 @@ class SmsSocksProxyServer(
 
     // socket2 is going to be the dummy.
     override def makeSocketPipe(socket1: Socket, socket2: Socket): SocketPipe = {
+      new SocketPipe(socket1, socket2) with SmsChunkHandler { self =>
+        logger.info(s"Connecting to ${socket2.getInetAddress}:${socket2.getPort}")
 
-      logger.info(s"Connecting to ${socket2.getInetAddress}:${socket2.getPort}")
+        // Make a real socket now.
+        val remote = new Socket(socket2.getInetAddress, socket2.getPort)
+        val remoteIn = remote.getInputStream
+        val remoteOut = remote.getOutputStream
 
-      // Make a real socket now.
-      val remote = new Socket(socket2.getInetAddress, socket2.getPort)
-      val remoteIn = remote.getInputStream
-      val remoteOut = remote.getOutputStream
+        // Register so we can pick the right handler when a message comes.
+        val id = counter.incrementAndGet()
+        handlers += id -> self
 
-      new SocketPipe(socket1, socket2) {
+        // An incrementing counter for outgoing chunks, starting from 1.
+        val chunkIds = Stream.from(0).iterator
 
-        override def close(): Boolean = {
-          Try(remote.close())
-          super.close()
-        }
+        // Keep track of the chunks we received from in SMS messages.
+        val chunks = TrieMap.empty[Int, Array[Byte]]
+
+        // When it's known, set the last chunk ID so we know when to stop waiting for more data.
+        var finalChunkId = 0
 
         def toSmsChunks(text: String): Vector[String] = {
           def loop(acc: Vector[String], text: String): Vector[String] = {
@@ -133,6 +114,24 @@ class SmsSocksProxyServer(
           val text = Base64.getEncoder.encodeToString(buffer.take(length))
           val chunks = toSmsChunks(text)
           chunks foreach { smsService.sendTextMessage(_) }
+        }
+
+        def onChunk(chunkId: Int, text: String) = {
+          if (text.endsWith(".")) {
+            val bytes = Base64.getDecoder.decode(text.dropRight(1))
+            chunks(chunkId) = bytes
+            // Indicate that we got the last chunk.
+            finalChunkId = chunkId
+          } else {
+            val bytes = Base64.getDecoder.decode(text)
+            chunks(chunkId) = bytes
+          }
+        }
+
+        override def close(): Boolean = {
+          Try(remote.close())
+          chunks.clear()
+          super.close()
         }
 
         // Will make two pipes to move the data between the two sockets in both directions.
@@ -198,6 +197,10 @@ class SmsSocksProxyServer(
 }
 
 object SmsSocksProxyServer {
+  trait SmsChunkHandler {
+    def onChunk(chunkId: Int, text: String): Unit
+  }
+
   class DummyInputStream() extends InputStream {
     override def read() = 0
   }

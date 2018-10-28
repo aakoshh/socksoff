@@ -24,6 +24,9 @@ class SmsSocksProxyServer(
   // How much data we can put in a text message.
   val MessageSize = 130
 
+  // How much to wait between checking for new SMS, in milliseconds.
+  val IdleTime = 100
+
   val proxyServer = {
     SocksServerBuilder
       .newBuilder(classOf[SmsSocketHandler])
@@ -167,7 +170,7 @@ class SmsSocksProxyServer(
                         -1
                       case _ =>
                         // Let the outside loop call this again a bit later.
-                        Thread.sleep(10)
+                        Thread.sleep(IdleTime)
                         0
                     }
                 }

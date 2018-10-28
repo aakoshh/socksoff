@@ -21,8 +21,8 @@ class SmsSocksProxyServer(
 
   import SmsSocksProxyServer._
 
-  // How much data to put in a text message.
-  val MessageSize = 100
+  // How much data we can put in a text message.
+  val MessageSize = 130
 
   val proxyServer = {
     SocksServerBuilder
@@ -111,16 +111,27 @@ class SmsSocksProxyServer(
           super.close()
         }
 
-        def sendInSMS(buffer: Array[Byte], length: Int): Unit = {
-          val text = Base64.getEncoder.encodeToString(buffer.take(length))
-          val chunks = text.grouped(MessageSize) map { chunk =>
-            val chunkId = chunkIds.next()
-            // Send the remote address the server has to connect to with the first request.
-            val addr = if (chunkId == 1) s":${socket2.getInetAddress}:${socket2.getPort}" else ""
-            val head = "${id}:${chunkId}${addr}"
-            logger.debug(s"Sending SMS chunk: ${head}")
-            s"${head}\n${chunk}"
+        def toSmsChunks(text: String): Vector[String] = {
+          def loop(acc: Vector[String], text: String): Vector[String] = {
+            if (text.isEmpty) acc else {
+              val chunkId = chunkIds.next()
+              // Send the remote address the server has to connect to with the first request.
+              val addr = if (chunkId == 1) s":${socket2.getInetAddress}:${socket2.getPort}" else ""
+              val head = s"${id}:${chunkId}${addr}"
+              // Take as much as we can
+              val length = MessageSize - head.size - 1
+              val body = text.take(length)
+              val chunk = s"${head}\n${body}"
+              logger.debug(s"Sending SMS chunk: ${head}")
+              loop(acc :+ chunk, text.drop(length))
+            }
           }
+          loop(Vector.empty, text)
+        }
+
+        def sendInSms(buffer: Array[Byte], length: Int): Unit = {
+          val text = Base64.getEncoder.encodeToString(buffer.take(length))
+          val chunks = toSmsChunks(text)
           chunks foreach { smsService.sendTextMessage(_) }
         }
 
@@ -139,7 +150,7 @@ class SmsSocksProxyServer(
                     // Send the data as SMS messages.
                     val length = localIn.read(buffer)
                     if (length > 0) {
-                      sendInSMS(buffer, length)
+                      sendInSms(buffer, length)
                       length
                     } else {
                       // There's no notification when the message is over, it just waits for the read.
